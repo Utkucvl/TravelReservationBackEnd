@@ -15,6 +15,7 @@ public class HotelDto {
     private String country; // Ülke
     private String postalCode; // Posta Kodu
     private String address;
+    private String neighborhood;
     private int starRating;
     private int singleRoomCount;
     private int doubleRoomCount;

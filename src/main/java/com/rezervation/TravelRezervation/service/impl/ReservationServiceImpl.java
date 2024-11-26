@@ -8,13 +8,17 @@ import com.rezervation.TravelRezervation.dao.entity.Reservation;
 import com.rezervation.TravelRezervation.dao.entity.User;
 import com.rezervation.TravelRezervation.dto.ReservationCreateDto;
 import com.rezervation.TravelRezervation.dto.ReservationDto;
+import com.rezervation.TravelRezervation.dto.UserReservationDto;
 import com.rezervation.TravelRezervation.service.ReservationService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.event.ContextRefreshedEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
-import java.util.List;
-import java.util.Optional;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
@@ -28,9 +32,12 @@ public class ReservationServiceImpl implements ReservationService {
 
     @Autowired
     private HotelRepository hotelRepository;
+    @Autowired
+    private EmailServiceImpl emailService;
 
     @Override
     public ReservationDto createReservation(ReservationCreateDto reservationCreateDto) {
+        System.out.println(reservationCreateDto);
         Optional<User> userOptional = userRepository.findById(reservationCreateDto.getUserId());
         if (userOptional.isEmpty()) {
             throw new IllegalArgumentException("Geçersiz kullanıcı ID'si: " + reservationCreateDto.getUserId());
@@ -54,22 +61,23 @@ public class ReservationServiceImpl implements ReservationService {
         reservation.setEntryDate(reservationCreateDto.getEntryDate());
         reservation.setOutDate(reservationCreateDto.getOutDate());
         reservation.setGuessCount(reservationCreateDto.getGuessCount());
+        reservation.setTotalPrice(reservationCreateDto.getTotalPrice());
+        user.getReservations().add(reservation);
+        hotel.getReservations().add(reservation);
 
-        if(reservation != null){
-            if(reservation.getGuessCount() == 1){
-                reservation.getHotel().setSingleRoomCount(reservation.getHotel().getSingleRoomCount()-1);
-            }
-            if(reservation.getGuessCount() == 2){
-                reservation.getHotel().setDoubleRoomCount(reservation.getHotel().getDoubleRoomCount()-1);
-            }
-            if(reservation.getGuessCount() == 3){
-                reservation.getHotel().setFamilyRoomCount(reservation.getHotel().getFamilyRoomCount()-1);
-            }
-            user.getReservations().add(reservation);
-            hotel.getReservations().add(reservation);
-            userRepository.save(user);
-            hotelRepository.save(hotel);
-        }
+        String addresss =hotel.getStreet()+"+"+hotel.getNeighborhood()+"+"+hotel.getCity()+"+"+hotel.getPostalCode();
+        String addressUrl = "https://www.google.com/maps/search/?api=1&query=" + addresss.replace(" ", "+");
+        String subject = "Rezervason Hatırlatma";
+        String text = "Sayın " + user.getUserName().toUpperCase() + " Bey/Hanım" + ",\n\n" +
+                "Rezervasyonunuz Bulunduğu Otelin Adı: " +hotel.getName()  + "\n" +
+                "Rezervasyon Giriş Tarihi : "+ reservation.getEntryDate().format(DateTimeFormatter.ofPattern("dd.MM.yyyy"))+ "\n"+
+                "Rezervasyon Çıkış Tarihi : "+ reservation.getOutDate().format(DateTimeFormatter.ofPattern("dd.MM.yyyy"))+ "\n"+
+                "Rezervasyon Kaç Kişili : " + reservation.getGuessCount() + "\n" +
+                "Rezervasyon Toplam Kaç TL : " + reservation.getTotalPrice() + "\n" +
+                "Otel Kaç Yıldızlı : "+ hotel.getStarRating() + "\n"+
+                "Haritada Göster : " + addressUrl +"\n\n"+
+                "İyi günler diler , sağlıklı ve mutlu günler dileriz.";
+        emailService.sendSimpleMessage(user.getEmail(), subject, text);
 
 
         Reservation savedReservation = reservationRepository.save(reservation);
@@ -86,21 +94,11 @@ public class ReservationServiceImpl implements ReservationService {
         Reservation reservation = reservationOptional.get();
         User user = reservation.getUser();
         Hotel hotel = reservation.getHotel();
-        if(reservation != null){
-            if(reservation.getGuessCount() == 1){
-                reservation.getHotel().setSingleRoomCount(reservation.getHotel().getSingleRoomCount()+1);
-            }
-            if(reservation.getGuessCount() == 2){
-                reservation.getHotel().setDoubleRoomCount(reservation.getHotel().getDoubleRoomCount()+1);
-            }
-            if(reservation.getGuessCount() == 3){
-                reservation.getHotel().setFamilyRoomCount(reservation.getHotel().getFamilyRoomCount()+1);
-            }
-            user.getReservations().remove(reservation);
-            hotel.getReservations().remove(reservation);
-            userRepository.save(user);
-            hotelRepository.save(hotel);
-        }
+        user.getReservations().remove(reservation);
+        hotel.getReservations().remove(reservation);
+        userRepository.save(user);
+        hotelRepository.save(hotel);
+
 
         reservationRepository.delete(reservation);
     }
@@ -187,6 +185,143 @@ public class ReservationServiceImpl implements ReservationService {
 
         return availableRooms; // Mevcut oda sayısını döndür
     }
+    @Override
+    public List<UserReservationDto> getFutureReservationsByUserId(Long userId) {
+        LocalDate currentDate = LocalDate.now();
+
+        // User ID'ye göre rezervasyonları al ve gelecekteki rezervasyonları filtrele
+        List<Reservation> reservations = reservationRepository.findByUserId(userId).stream()
+                .filter(reservation -> reservation.getEntryDate().isAfter(currentDate))
+                .collect(Collectors.toList());
+
+        // Reservation'ları DTO'ya dönüştürerek döndür
+        return reservations.stream()
+                .map(this::convertToUserReservationDto)
+                .collect(Collectors.toList());
+    }
+    @Override
+    public void notifyUsersForNextDayReservations() {
+        LocalDateTime tomorrow = LocalDateTime.now().plusDays(1);
+        List<Reservation> reservations = reservationRepository.findAll();
+        reservations.stream()
+                .filter(reservation -> reservation.getEntryDate().isEqual(tomorrow.toLocalDate()))
+                .forEach(reservation -> {
+                    String addresss =reservation.getHotel().getStreet()+"+"+reservation.getHotel().getNeighborhood()+"+"+reservation.getHotel().getCity()+"+"+reservation.getHotel().getPostalCode();
+                    String addressUrl = "https://www.google.com/maps/search/?api=1&query=" + addresss.replace(" ", "+");
+                    String subject = "Rezervason Hatırlatma";
+                    String text = "Sayın " + reservation.getUser().getUserName().toUpperCase() + " Bey/Hanım" + ",\n\n" +
+                            "Rezervasyonunuz Bulunduğu Otelin Adı: " +reservation.getHotel().getName()  + "\n" +
+                            "Rezervasyon Giriş Tarihi : "+ reservation.getEntryDate().format(DateTimeFormatter.ofPattern("dd.MM.yyyy"))+ "\n"+
+                            "Rezervasyon Çıkış Tarihi : "+ reservation.getOutDate().format(DateTimeFormatter.ofPattern("dd.MM.yyyy"))+ "\n"+
+                            "Rezervasyon Kaç Kişili : " + reservation.getGuessCount() + "\n" +
+                            "Rezervasyon Toplam Kaç TL : " + reservation.getTotalPrice() + "\n" +
+                            "Otel Kaç Yıldızlı : "+ reservation.getHotel().getStarRating() + "\n"+
+                            "Haritada Göster : " + addressUrl +"\n\n"+
+                            "İyi günler diler , sağlıklı ve mutlu günler dileriz.";
+                    emailService.sendSimpleMessage(reservation.getUser().getEmail(), subject, text);
+                });
+    }
+
+    @Override
+    public void notifyUsersForNextWeekReservations() {
+        LocalDateTime tomorrow = LocalDateTime.now().plusDays(7);
+        List<Reservation> reservations = reservationRepository.findAll();
+        reservations.stream()
+                .filter(reservation -> reservation.getEntryDate().isEqual(tomorrow.toLocalDate()))
+                .forEach(reservation -> {
+                    String addresss =reservation.getHotel().getStreet()+"+"+reservation.getHotel().getNeighborhood()+"+"+reservation.getHotel().getCity()+"+"+reservation.getHotel().getPostalCode();
+                    String addressUrl = "https://www.google.com/maps/search/?api=1&query=" + addresss.replace(" ", "+");
+                    String subject = "Rezervason Hatırlatma";
+                    String text = "Sayın " + reservation.getUser().getUserName().toUpperCase() + " Bey/Hanım" + ",\n\n" +
+                            "Rezervasyonunuz Bulunduğu Otelin Adı: " +reservation.getHotel().getName()  + "\n" +
+                            "Rezervasyon Giriş Tarihi : "+ reservation.getEntryDate().format(DateTimeFormatter.ofPattern("dd.MM.yyyy"))+ "\n"+
+                            "Rezervasyon Çıkış Tarihi : "+ reservation.getOutDate().format(DateTimeFormatter.ofPattern("dd.MM.yyyy"))+ "\n"+
+                            "Rezervasyon Kaç Kişili : " + reservation.getGuessCount() + "\n" +
+                            "Rezervasyon Toplam Kaç TL : " + reservation.getTotalPrice() + "\n" +
+                            "Otel Kaç Yıldızlı : "+ reservation.getHotel().getStarRating() + "\n"+
+                            "Haritada Göster : " + addressUrl +"\n\n"+
+                            "İyi günler diler , sağlıklı ve mutlu günler dileriz.";
+                    emailService.sendSimpleMessage(reservation.getUser().getEmail(), subject, text);
+                });
+    }
+
+    @Override
+    public List<Map<String, Integer>> getReservedHotelsForOneYear() {
+        LocalDate oneYearAgo = LocalDate.now().minusYears(1);
+        List<Reservation> reservations = reservationRepository.findAll();
+
+        // Otel adlarını ve rezervasyon sayılarını saklamak için bir harita oluştur
+        Map<String, Integer> hotelReservationCount = new HashMap<>();
+
+        for (Reservation reservation : reservations) {
+            // Rezervasyon tarihi bir yıl öncesinden sonra mı?
+            if (reservation.getEntryDate().isAfter(oneYearAgo)) {
+                String hotelName = reservation.getHotel().getName(); // Otel adını al
+
+                // Haritada otel adı varsa sayısını artır, yoksa 1 ile başla
+                hotelReservationCount.put(hotelName, hotelReservationCount.getOrDefault(hotelName, 0) + 1);
+            }
+        }
+
+        // Haritayı bir diziye ekle
+        List<Map<String, Integer>> result = new ArrayList<>();
+        result.add(hotelReservationCount);
+
+        return result; // Dizi olarak döndür
+    }
+
+    @Override
+    public int getTotalPriceOfReservationsOneMonthAgo() {
+        LocalDate oneMonthAgo = LocalDate.now().minusMonths(1);
+        List<Reservation> reservations = reservationRepository.findAll();
+
+        int totalPrice = reservations.stream()
+                .filter(reservation -> reservation.getEntryDate().isAfter(oneMonthAgo)
+                        && reservation.getEntryDate().isBefore(LocalDate.now()))
+                .mapToInt(Reservation::getTotalPrice)
+                .sum();
+
+        return totalPrice;
+    }
+    @Override
+    public int getTotalPriceOfReservationsOneWeekAgo() {
+        LocalDate oneMonthAgo = LocalDate.now().minusWeeks(1);
+        List<Reservation> reservations = reservationRepository.findAll();
+
+        int totalPrice = reservations.stream()
+                .filter(reservation -> reservation.getEntryDate().isAfter(oneMonthAgo)
+                        && reservation.getEntryDate().isBefore(LocalDate.now()))
+                .mapToInt(Reservation::getTotalPrice)
+                .sum();
+
+        return totalPrice;
+    }
+
+    @Override
+    public int getNumOfReservationsOneMonthAgo() {
+        LocalDate oneMonthAgo = LocalDate.now().minusMonths(1);
+        List<Reservation> reservations = reservationRepository.findAll();
+
+        long reservationCount = reservations.stream()
+                .filter(reservation -> reservation.getEntryDate().isAfter(oneMonthAgo)
+                        && reservation.getEntryDate().isBefore(LocalDate.now()))
+                .count();
+
+        return (int) reservationCount;
+    }
+    @Override
+    public int getNumOfReservationsOneWeekAgo() {
+        LocalDate oneMonthAgo = LocalDate.now().minusWeeks(1);
+        List<Reservation> reservations = reservationRepository.findAll();
+
+        long reservationCount = reservations.stream()
+                .filter(reservation -> reservation.getEntryDate().isAfter(oneMonthAgo)
+                        && reservation.getEntryDate().isBefore(LocalDate.now()))
+                .count();
+
+        return (int) reservationCount;
+    }
+
 
 
     // Manual Mapping Methods
@@ -198,16 +333,26 @@ public class ReservationServiceImpl implements ReservationService {
         reservationDto.setEntryDate(reservation.getEntryDate());
         reservationDto.setOutDate(reservation.getOutDate());
         reservationDto.setGuessCount(reservation.getGuessCount());
+        reservationDto.setTotalPrice(reservation.getTotalPrice());
         return reservationDto;
     }
-
-    private Reservation convertToReservation(ReservationCreateDto reservationCreateDto, User user, Hotel hotel) {
-        Reservation reservation = new Reservation();
-        reservation.setUser(user);
-        reservation.setHotel(hotel);
-        reservation.setGuessCount(reservationCreateDto.getGuessCount());
-        reservation.setEntryDate(reservationCreateDto.getEntryDate());
-        reservation.setOutDate(reservationCreateDto.getOutDate());
-        return reservation;
+    private UserReservationDto convertToUserReservationDto(Reservation reservation) {
+        UserReservationDto reservationDto = new UserReservationDto();
+        reservationDto.setId(reservation.getId());
+        reservationDto.setUserName(reservation.getUser().getUserName());
+        reservationDto.setEmail(reservation.getUser().getEmail());
+        reservationDto.setEntryDate(reservation.getEntryDate());
+        reservationDto.setOutDate(reservation.getOutDate());
+        reservationDto.setGuessCount(reservation.getGuessCount());
+        reservationDto.setTotalPrice(reservation.getTotalPrice());
+        reservationDto.setCity(reservation.getHotel().getCity());
+        reservationDto.setCountry(reservation.getHotel().getCountry());
+        reservationDto.setHotelName(reservation.getHotel().getName());
+        return reservationDto;
+    }
+    @EventListener(ContextRefreshedEvent.class)
+    public void onApplicationEvent() {
+        notifyUsersForNextWeekReservations();
+        notifyUsersForNextDayReservations();
     }
 }

@@ -15,7 +15,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 @RestController
-@RequestMapping("/user")
+@RequestMapping("/users")
 public class UserController {
     private UserService userService;
 
@@ -24,12 +24,9 @@ public class UserController {
     }
 
     @GetMapping("/{userId}")
-    public ResponseEntity<UserDto> getOneUser(@PathVariable Long userId){
-        User user = userService.findById(userId);
-        UserDto userDto = new UserDto();
-        userDto.setUserName(user.getUserName());
-        userDto.setId(user.getId());
-        return new ResponseEntity<>(userDto, HttpStatus.OK);
+    public ResponseEntity<UserDtoWithName> getOneUser(@PathVariable Long userId){
+        UserDtoWithName user = userService.findById(userId);
+        return new ResponseEntity<>(user, HttpStatus.OK);
     }
     @GetMapping()
     public ResponseEntity<List<UserDtoWithName>> getAll() {

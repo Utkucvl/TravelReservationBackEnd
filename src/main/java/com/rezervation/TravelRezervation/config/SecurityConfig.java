@@ -103,10 +103,10 @@ public class SecurityConfig {
                 .exceptionHandling(handler->handler.authenticationEntryPoint(unauthorizedHandler))
                 .authorizeRequests(authorize -> authorize
                         .requestMatchers(HttpMethod.POST, "/auth/**").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/testimonial").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/blog").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/toVisit").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/hotel/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/testimonials").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/blogs").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/toVisits").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/hotels/**").permitAll()
                         .anyRequest().authenticated()
                 ).rememberMe(rememberMe -> rememberMe
                         .tokenRepository(persistentTokenRepository())

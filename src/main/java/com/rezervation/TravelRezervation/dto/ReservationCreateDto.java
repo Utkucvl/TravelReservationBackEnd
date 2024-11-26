@@ -8,6 +8,7 @@ public class ReservationCreateDto {
     private Long userId;
     private Long hotelId;
     private int guessCount;
+    private int totalPrice;
     private LocalDate entryDate;
     private LocalDate outDate;
 }

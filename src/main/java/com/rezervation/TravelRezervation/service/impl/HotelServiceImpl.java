@@ -114,14 +114,6 @@ public class HotelServiceImpl implements HotelService {
             throw new IllegalArgumentException("Geçersiz misafir sayısı belirtildi.");
         }
 
-
-        // Tarih aralığı ve fiyata göre filtreleme
-        //if (entryDate != null && outDate != null) {
-        //hotels = hotels.stream()
-        //.filter(hotel -> hotel.isAvailable(entryDate, outDate)) // Otelin belirtilen tarihlerde uygun olup olmadığını kontrol edin
-        //.collect(Collectors.toList());
-        //}
-
         // Tarih aralığı ve fiyata göre filtreleme
         if (maxPrice != null) {
             hotels = hotels.stream()
@@ -140,10 +132,21 @@ public class HotelServiceImpl implements HotelService {
 
         // Belirtilen tarihler arasındaki toplam fiyatı hesapla ve HotelDto'ya ekle
         long daysBetween = entryDate != null && outDate != null ? entryDate.until(outDate).getDays() : 0;
-        System.out.println(hotels);;
+
         return hotels.stream()
                 .map(hotel -> {
                     HotelDto hotelDto = convertToDto(hotel);
+                    int availableRoomCount = reservationServiceImpl.getAvailableRoomCount((long) hotel.getId(), entryDate, outDate, guestCount);
+
+                    // availableRoomCount'u HotelDto'ya ayarlayın
+                    if (guestCount == 1) {
+                        hotelDto.setSingleRoomCount(availableRoomCount);
+                    } else if (guestCount == 2) {
+                        hotelDto.setDoubleRoomCount(availableRoomCount);
+                    } else if (guestCount >= 3) {
+                        hotelDto.setFamilyRoomCount(availableRoomCount);
+                    }
+
                     if (daysBetween > 0) {
                         int roomPrice = 0;
                         if (guestCount == 1) {
@@ -157,8 +160,19 @@ public class HotelServiceImpl implements HotelService {
                     }
                     return hotelDto;
                 })
+                .filter(hotelDto -> { // Available room count'u kontrol ederek otelleri filtreleyin
+                    if (guestCount == 1) {
+                        return hotelDto.getSingleRoomCount() > 0;
+                    } else if (guestCount == 2) {
+                        return hotelDto.getDoubleRoomCount() > 0;
+                    } else if (guestCount >= 3) {
+                        return hotelDto.getFamilyRoomCount() > 0;
+                    }
+                    return true;
+                })
                 .collect(Collectors.toList());
     }
+
 
 
 
@@ -176,6 +190,7 @@ public class HotelServiceImpl implements HotelService {
         hotelDto.setCountry(hotel.getCountry());
         hotelDto.setPostalCode(hotel.getPostalCode());
         hotelDto.setAddress(hotel.getAddress());
+        hotelDto.setNeighborhood(hotel.getNeighborhood());
         hotelDto.setStarRating(hotel.getStarRating());
         hotelDto.setSingleRoomCount(hotel.getSingleRoomCount());
         hotelDto.setDoubleRoomCount(hotel.getDoubleRoomCount());
@@ -200,6 +215,7 @@ public class HotelServiceImpl implements HotelService {
         hotel.setCountry(hotelCreateDto.getCountry());
         hotel.setPostalCode(hotelCreateDto.getPostalCode());
         hotel.setAddress(hotelCreateDto.getAddress());
+        hotel.setNeighborhood(hotelCreateDto.getNeighborhood());
         hotel.setStarRating(hotelCreateDto.getStarRating());
         hotel.setSingleRoomCount(hotelCreateDto.getSingleRoomCount());
         hotel.setDoubleRoomCount(hotelCreateDto.getDoubleRoomCount());
